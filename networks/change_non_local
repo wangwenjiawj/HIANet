@@ -1,0 +1,94 @@
+import torch.nn as nn
+import torch
+import torch.nn.functional as F
+from torch.nn import BatchNorm2d as bn
+
+
+class NonLocalBlock(nn.Module):
+    """ NonLocalBlock Module"""
+    def __init__(self, in_channels):
+        super(NonLocalBlock, self).__init__()
+
+        conv_nd = nn.Conv2d
+
+        self.in_channels = in_channels
+        self.inter_channels = self.in_channels // 2
+
+        self.ImageAfterASPP_bnRelu = nn.Sequential(
+            nn.BatchNorm2d(self.in_channels),
+            nn.ReLU(inplace=True),
+        )
+
+        self.DepthAfterASPP_bnRelu = nn.Sequential(
+            nn.BatchNorm2d(self.in_channels),
+            nn.ReLU(inplace=True),
+        )
+
+        self.R_g = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
+                         kernel_size=1, stride=1, padding=0)
+        self.R_theta = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
+                             kernel_size=1, stride=1, padding=0)
+        self.R_phi = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
+                           kernel_size=1, stride=1, padding=0)
+        self.R_W = conv_nd(in_channels=self.inter_channels, out_channels=self.in_channels,
+                    kernel_size=1, stride=1, padding=0)
+
+        self.F_g = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
+                         kernel_size=1, stride=1, padding=0)
+        self.F_theta = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
+                             kernel_size=1, stride=1, padding=0)
+        self.F_phi = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
+                           kernel_size=1, stride=1, padding=0)
+        self.F_W = conv_nd(in_channels=self.inter_channels, out_channels=self.in_channels,
+                         kernel_size=1, stride=1, padding=0)
+
+    def forward(self, self_fea, mutual_fea):
+
+
+        selfNonLocal_fea = self.ImageAfterASPP_bnRelu(self_fea)
+        mutualNonLocal_fea = self.DepthAfterASPP_bnRelu(mutual_fea)
+
+        batch_size = selfNonLocal_fea.size(0)
+
+        g_x = self.R_g(selfNonLocal_fea).view(batch_size, self.inter_channels, -1)
+        g_x = g_x.permute(0, 2, 1)
+
+        # using mutual feature to generate attention
+        theta_x = self.F_theta(mutualNonLocal_fea).view(batch_size, self.inter_channels, -1)
+        theta_x = theta_x.permute(0, 2, 1)
+        phi_x = self.F_phi(mutualNonLocal_fea).view(batch_size, self.inter_channels, -1)
+        f = torch.matmul(theta_x, phi_x)
+
+        # using self feature to generate attention
+        self_theta_x = self.R_theta(selfNonLocal_fea).view(batch_size, self.inter_channels, -1)
+        self_theta_x = self_theta_x.permute(0, 2, 1)
+        self_phi_x = self.R_phi(selfNonLocal_fea).view(batch_size, self.inter_channels, -1)
+        self_f = torch.matmul(self_theta_x, self_phi_x)
+
+        # add self_f and mutual f
+        f_div_C = F.softmax(1.0*f + self_f, dim=-1)
+
+        y = torch.matmul(f_div_C, g_x)
+        y = y.permute(0, 2, 1).contiguous()
+        y = y.view(batch_size, self.inter_channels, *selfNonLocal_fea.size()[2:])
+        W_y = self.R_W(y)
+        z = W_y + self_fea
+        return z
+
+
+
+
+
+class NONLocalBlock2D(NonLocalBlock):
+    def __init__(self, in_channels):
+        super(NONLocalBlock2D, self).__init__(in_channels)
+
+
+# class NONLocalBlock2D(_NonLocalBlockND):
+#     def __init__(self, in_channels, inter_channels=None, sub_sample=True, bn_layer=True):
+#         super(NONLocalBlock2D, self).__init__(in_channels,
+#                                               inter_channels=inter_channels,
+#                                               dimension=2, sub_sample=sub_sample,
+#                                               bn_layer=bn_layer)
+
+
