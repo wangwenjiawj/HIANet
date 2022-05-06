@@ -1,0 +1,61 @@
+import torch.nn as nn
+import torch.nn.functional as F
+import torch
+import math
+from .tran import Transformer
+
+    
+class hiftmodule(nn.Module):
+    
+    def __init__(self, cfg):
+        super(hiftmodule, self).__init__()
+        channel = 512
+        self.row_embed = nn.Embedding(2, channel//2)
+        self.col_embed = nn.Embedding(2, channel//2)
+        self.reset_parameters()
+        
+        self.transformer = Transformer(channel, 8, 1, 1)
+
+    def reset_parameters(self):
+        nn.init.uniform_(self.row_embed.weight)
+        nn.init.uniform_(self.col_embed.weight)
+
+    def forward(self, x, y, z):
+        res1 = x#(2,512,32,32)
+        res2 = y#(2,256,32,32)
+        res3 = z#(2,512,32,32)
+        # res4 = m
+        # res5 = n
+
+        h, w = res3.shape[-2:]
+        i = torch.arange(w).cuda()
+        j = torch.arange(h).cuda()
+        x_emb = self.col_embed(i)#(32,256)
+        y_emb = self.row_embed(j)
+        pos = torch.cat([
+            x_emb.unsqueeze(0).repeat(h, 1, 1),
+            y_emb.unsqueeze(1).repeat(1, w, 1),
+        ], dim=-1).permute(2, 0, 1).unsqueeze(0).repeat(res3.shape[0], 1, 1, 1)#(2,512,32,32)
+
+        b, c, w, h = res3.size()
+        res = self.transformer((pos+res1).view(b, c, -1).permute(2, 0, 1),\
+                             (pos+res2).view(b, c, -1).permute(2, 0, 1),\
+                             res3.view(b, c, -1).permute(2, 0, 1),)
+        # print((pos+res1).view(b, c, -1).permute(2, 0, 1))
+        # print((pos+res2).view(b, c, -1).permute(2, 0, 1))
+        # print(res3.view(b, c, -1).permute(2, 0, 1))
+        # res = self.transformer((pos + res1).view(b, c, -1).permute(2, 0, 1),\
+        #                        (pos + res2).view(b, c, -1).permute(2, 0, 1),\
+        #                        (pos + res3).view(b, c, -1).permute(2, 0, 1),\
+        #                        (pos + res4).view(b, c, -1).permute(2, 0, 1),\
+        #                        res5.view(b, c, -1).permute(2, 0, 1),)
+        
+        res = res.permute(1, 2, 0).view(b, c, w, h)
+        
+        return res
+
+
+
+
+
+
